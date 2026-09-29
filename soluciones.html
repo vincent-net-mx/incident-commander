@@ -39,23 +39,25 @@ pre code{padding:0;background:none}
 <details><summary>2. ¿Puedes agregar UNIQUE con un simple ALTER TABLE?</summary><div>No en SQLite. Piensa en el proceso de cuatro pasos: crear tabla nueva con las restricciones, copiar, borrar la original, renombrar.</div></details>
 <details><summary>3. ¿Por qué falla la copia si copias todo tal cual?</summary><div>Ejecuta <code>audit schema</code>. Hay emails duplicados y nulos en los datos actuales. La tabla nueva los rechazará, así que debes depurarlos al copiar (por ejemplo, conservar un solo registro por email y asignar un correo a quienes no tienen).</div></details>
 <details class="sol"><summary>Revelar solución</summary><div>
-<pre><code>UPDATE permisos_usuarios SET es_admin=0, puede_leer_vip=0 WHERE usuario='intern_04';
-
+<pre><code>
 %% Comando 1.
+UPDATE permisos_usuarios SET es_admin=0, puede_leer_vip=0 WHERE usuario='intern_04';
+
+%% Comando 2.
 CREATE TABLE empleados_new(id INTEGER PRIMARY KEY, nombre TEXT,
   email TEXT NOT NULL UNIQUE, rol TEXT);
 
-%% Comando 2:
+%% Comando 3:
 INSERT INTO empleados_new(id,nombre,email,rol)
 SELECT id, nombre, COALESCE(email, lower(nombre)||'@corp.com'), rol
 FROM empleados
 WHERE email IS NULL
    OR id IN (SELECT MIN(id) FROM empleados WHERE email IS NOT NULL GROUP BY email);
 
-%% Comando 3:
+%% Comando 4:
 DROP TABLE empleados;
 
-%% Comando 4:
+%% Comando 5:
 ALTER TABLE empleados_new RENAME TO empleados;</code></pre>
 <p>Después ejecuta <code>commit-incident</code>. Escribe cada bloque en una sola línea con <code>sql</code> delante.</p>
 <p class="tip"><b>Por qué funciona:</b> el UPDATE aplica PoLP; <code>COALESCE</code> rellena los nulos; el <code>MIN(id)</code> elimina duplicados. En un caso real, borrar a "Ana Ruiz" sería una decisión de negocio: quizá corresponda corregir su email en lugar de descartarla.</p></div></details></section>
