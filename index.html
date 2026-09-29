@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Incident Commander</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.js"></script>
+<style>
+:root{--bg:#0b1220;--pn:#111a2e;--ln:#22314f;--tx:#cbd5e1;--cy:#22d3ee;--yl:#fbbf24;--rd:#f87171;--gn:#4ade80;--mu:#64748b}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--tx);font:14px/1.5 "JetBrains Mono","Fira Code",Consolas,monospace;display:grid;grid-template-columns:60fr 40fr;gap:10px;padding:10px}
+section{background:var(--pn);border:1px solid var(--ln);border-radius:8px;min-height:0;display:flex;flex-direction:column}
+#out{flex:1;overflow:auto;padding:12px;white-space:pre-wrap;word-break:break-word}
+#out .i{color:var(--cy)}#out .w{color:var(--yl)}#out .e{color:var(--rd)}#out .o{color:var(--gn)}#out .c{color:var(--tx)}#out .m{color:var(--mu)}
+form{display:flex;border-top:1px solid var(--ln);padding:8px 12px;gap:6px}
+.pr{color:var(--gn);white-space:nowrap}
+#in{flex:1;background:none;border:0;color:#fff;font:inherit;outline:0}
+#dash{overflow:auto;padding:12px;display:block}
+h2{margin:14px 0 6px;font-size:13px;color:var(--cy);font-weight:600}h2:first-child{margin-top:0}
+#ban{padding:8px 10px;border-left:3px solid var(--cy);background:#0d1830}
+.bar{margin:6px 0}.bar div{height:9px;background:#0b1220;border-radius:5px;overflow:hidden;border:1px solid var(--ln)}
+.bar i{display:block;height:100%;background:var(--cy);transition:width .5s}
+.bar b{font-weight:500;font-size:12px}
+.ob{padding:4px 8px;margin:4px 0;border:1px solid var(--ln);border-radius:5px;font-size:12px}
+.ob.ok{border-color:var(--gn);color:var(--gn)}
+.lv button{background:none;border:1px solid var(--ln);color:var(--tx);padding:3px 9px;margin:2px;border-radius:5px;font:inherit;cursor:pointer}
+.lv button:disabled{opacity:.35;cursor:not-allowed}.lv button.on{border-color:var(--cy);color:var(--cy)}
+#ins pre{margin:4px 0 10px;font-size:11px;overflow:auto;background:#0b1220;padding:6px;border-radius:5px}
+@media(max-width:800px){body{grid-template-columns:1fr;grid-auto-rows:minmax(60vh,auto);height:auto}}
+</style></head><body>
+<section><div id="out"></div><form id="f"><span class="pr">analyst@incident-ops:~$&nbsp;</span><input id="in" autocomplete="off" spellcheck="false" autofocus></form></section>
+<section id="dash">
+<h2>Misión activa</h2><div id="ban"></div><div class="lv" id="lv"></div>
+<h2>Tríada CIA</h2><div id="cia"></div>
+<h2>Objetivos</h2><div id="obs"></div>
+<h2>Inspector de contexto</h2><div id="ins"></div>
+</section>
+<script>
+const $=s=>document.querySelector(s),out=$('#out');
+let SQL,db,cur=0,solved=[0,0,0],unlocked=[1,0,0],saved=[],hist=[],hi=0,exp={};
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+function p(t,c='c'){const d=document.createElement('div');d.className=c;d.innerHTML=esc(t);out.appendChild(d);out.scrollTop=out.scrollHeight}
+const q=s=>{const r=db.exec(s);return r.length?r[0]:{columns:[],values:[]}};
+const one=s=>{const v=q(s).values[0];return v?v[0]:null};
+function fmt(r){if(!r.columns.length)return'(sin filas)';const w=r.columns.map((c,i)=>Math.max(c.length,...r.values.map(v=>String(v[i]).length)));const l=a=>a.map((x,i)=>String(x).padEnd(w[i])).join(' | ');return[l(r.columns),w.map(n=>'-'.repeat(n)).join('-+-'),...r.values.map(l)].join('\n')}
+function blocked(l){db.run('SAVEPOINT k');let b=false;try{l.forEach(s=>db.run(s))}catch(e){b=true}db.run('ROLLBACK TO k');db.run('RELEASE k');return b}
+const T=f=>{try{return!!f()}catch(e){return false}};
+const M=[
+{id:1,name:"The Intern's Token",topic:"DDL y Menor Privilegio (PoLP)",
+ctx:"El token del pasante intern_04 tenía permisos excesivos y provocó una fuga de clientes VIP. La tabla empleados no tiene restricciones.",
+schema:()=>`CREATE TABLE empleados(id INTEGER PRIMARY KEY,nombre TEXT,email TEXT,rol TEXT);
+INSERT INTO empleados(nombre,email,rol) VALUES('Ana','ana@corp.com','dev'),('Luis','luis@corp.com','ops'),('Ana Ruiz','ana@corp.com','dev'),('Pepe',NULL,'soporte'),('Marta',NULL,'rrhh');
+CREATE TABLE permisos_usuarios(usuario TEXT PRIMARY KEY,es_admin INTEGER,puede_leer_vip INTEGER);
+INSERT INTO permisos_usuarios VALUES('admin_root',1,1),('intern_04',1,1),('analyst_01',0,0);
+CREATE TABLE clientes_vip(id INTEGER PRIMARY KEY,nombre TEXT,tarjeta TEXT);
+INSERT INTO clientes_vip VALUES(1,'Cliente Oro','**** 4411'),(2,'Cliente Platino','**** 9032');`,
+obs:[["Revocar admin y acceso VIP a intern_04 (PoLP)"],["email sin duplicados (UNIQUE)"],["email obligatorio (NOT NULL)"]],
+hints:["UPDATE permisos_usuarios SET ... WHERE usuario='intern_04'","SQLite no permite ALTER ... ADD CONSTRAINT: reconstruye empleados (CREATE nueva, INSERT SELECT limpio, DROP, RENAME).","Antes de migrar, depura emails duplicados y nulos."],
+audit:{perms:()=>fmt(q("SELECT * FROM permisos_usuarios")),schema:()=>fmt(q("SELECT name,type,\"notnull\" FROM pragma_table_info('empleados')"))+'\n\n'+fmt(q("SELECT email,COUNT(*) n FROM empleados GROUP BY email HAVING n>1 OR email IS NULL"))},
+chk:()=>[T(()=>{const a=q("SELECT es_admin,puede_leer_vip FROM permisos_usuarios WHERE usuario='intern_04'").values[0];return a&&a[0]==0&&a[1]==0}),
+T(()=>blocked(["INSERT INTO empleados(nombre,email,rol) VALUES('t','zz@t.com','x')","INSERT INTO empleados(nombre,email,rol) VALUES('t2','zz@t.com','x')"])),
+T(()=>blocked(["INSERT INTO empleados(nombre,email,rol) VALUES('t',NULL,'x')"]))]},
+{id:2,name:"Ghost Invoices",topic:"Claves foráneas e integridad referencial",
+ctx:"Auditoría financiera: hay cobros huérfanos sin cliente. facturas no tiene FOREIGN KEY y borrar un usuario deja cobros sin trazabilidad.",
+schema:()=>`CREATE TABLE usuarios(id_usuario INTEGER PRIMARY KEY,nombre TEXT);
+INSERT INTO usuarios VALUES(1,'Ana'),(2,'Luis'),(3,'Marta');
+CREATE TABLE facturas(id_factura INTEGER PRIMARY KEY,id_usuario INTEGER,monto REAL);
+INSERT INTO facturas VALUES(1,1,120),(2,2,80),(3,99,500),(4,404,999),(5,3,45);`,
+obs:[["Depurar o reasignar facturas huérfanas"],["FOREIGN KEY ... ON DELETE RESTRICT en facturas"],["El motor bloquea borrar usuarios con facturas"]],
+hints:["Reasigna con UPDATE o borra con DELETE las facturas con id_usuario inexistente.","Reconstruye facturas con FOREIGN KEY (id_usuario) REFERENCES usuarios(id_usuario) ON DELETE RESTRICT.","PRAGMA foreign_keys=ON ya está activo en esta sesión."],
+audit:{orphans:()=>fmt(q("SELECT f.* FROM facturas f LEFT JOIN usuarios u ON u.id_usuario=f.id_usuario WHERE u.id_usuario IS NULL")),fk:()=>fmt(q("PRAGMA foreign_key_list(facturas)"))},
+chk:()=>{db.run("PRAGMA foreign_keys=ON");return[T(()=>one("SELECT COUNT(*) FROM facturas f LEFT JOIN usuarios u ON u.id_usuario=f.id_usuario WHERE u.id_usuario IS NULL")==0),
+T(()=>q("PRAGMA foreign_key_list(facturas)").values.some(r=>r[2]=='usuarios'&&r[3]=='id_usuario'&&r[6]=='RESTRICT')),
+T(()=>one("SELECT COUNT(*) FROM facturas")>0&&blocked(["DELETE FROM usuarios WHERE id_usuario=(SELECT id_usuario FROM facturas LIMIT 1)"]))]}},
+{id:3,name:"The Monolith Freeze",topic:"Normalización 1NF-3NF e indexación",
+ctx:"En ventas pico la latencia supera 4,000 ms: una tabla monolítica con listas de productos, datos de cliente repetidos y sin índices.",
+schema:()=>{const C=[['Ana','ana@x.com','CDMX'],['Luis','luis@x.com','GDL'],['Marta','marta@x.com','MTY']],P=['Laptop;Mouse','USB;Teclado;Monitor','Cable','Mouse;USB'];let s="CREATE TABLE monolito(id_pedido INTEGER PRIMARY KEY,cliente_nombre TEXT,cliente_email TEXT,cliente_ciudad TEXT,productos TEXT,fecha_pedido TEXT,total REAL);",it=0;for(let i=0;i<8;i++){const c=C[i%3],pr=P[i%4];it+=pr.split(';').length;s+=`INSERT INTO monolito VALUES(${i+1},'${c[0]}','${c[1]}','${c[2]}','${pr}','2026-01-${10+i%4}',${100+i*10});`}exp={cl:3,pe:8,it};return s},
+obs:[["Esquema normalizado: clientes, pedidos, detalle_pedidos"],["Datos migrados con atomicidad (1 producto por fila)"],["Índice en pedidos(fecha_pedido)"]],
+hints:["Crea clientes(id,nombre,email,ciudad), pedidos(id,id_cliente,fecha_pedido,total), detalle_pedidos(id_pedido,producto).","Separa productos con INSERTs manuales o un CTE recursivo con substr/instr sobre ';'.","CREATE INDEX idx_fecha ON pedidos(fecha_pedido);"],
+audit:{plan:()=>fmt(q("EXPLAIN QUERY PLAN SELECT * FROM "+(one("SELECT COUNT(*) FROM sqlite_master WHERE name='pedidos'")?'pedidos':'monolito')+" WHERE fecha_pedido='2026-01-12'")),'1nf':()=>fmt(q("SELECT id_pedido,productos FROM monolito LIMIT 5"))},
+chk:()=>[T(()=>one("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN('clientes','pedidos','detalle_pedidos')")==3&&one("SELECT COUNT(*) FROM pragma_table_info('pedidos') WHERE name IN('cliente_nombre','cliente_email','cliente_ciudad','productos')")==0),
+T(()=>one("SELECT COUNT(*) FROM clientes")==exp.cl&&one("SELECT COUNT(*) FROM pedidos")==exp.pe&&one("SELECT COUNT(*) FROM detalle_pedidos")==exp.it&&one("SELECT COUNT(*) FROM pragma_table_info('detalle_pedidos') WHERE name='productos'")==0),
+T(()=>/USING (COVERING )?INDEX/.test(q("EXPLAIN QUERY PLAN SELECT * FROM pedidos WHERE fecha_pedido='2026-01-12'").values.map(r=>r[3]).join(' ')))]}
+];
+const DIM=[[0,1,1],[1,1,2],[1,2,2]],DN=["Confidencialidad","Integridad","Disponibilidad"];
+function fresh(i){db=new SQL.Database();db.exec(M[i].schema());db.run("PRAGMA foreign_keys=ON")}
+function load(i,reset){if(db)saved[cur]=db.export();if(reset||!saved[i]){fresh(i)}else{db=new SQL.Database(saved[i]);db.run("PRAGMA foreign_keys=ON")}
+cur=i;const m=M[i];p('\n══ MISIÓN '+m.id+': '+m.name+' ══','i');p(m.topic,'w');p(m.ctx);p('Pistas:','m');m.hints.forEach(h=>p(' · '+h,'m'));p("Escribe 'help' para ver comandos.",'m');render()}
+function render(){const m=M[cur],r=m.chk();
+$('#ban').innerHTML=`<b>Misión ${m.id}: ${esc(m.name)}</b><br><small>${esc(m.topic)}</small>`;
+$('#lv').innerHTML=M.map((x,i)=>`<button ${unlocked[i]?'':'disabled'} class="${i==cur?'on':''}" onclick="run('load ${i+1}')">${x.id}${solved[i]?' ✓':''}</button>`).join('');
+$('#obs').innerHTML=m.obs.map((o,i)=>`<div class="ob ${r[i]?'ok':''}">${r[i]?'✔':'○'} ${esc(o[0])}</div>`).join('');
+$('#cia').innerHTML=DN.map((n,d)=>{const ix=m.obs.map((o,i)=>i).filter(i=>DIM[cur][i]==d),done=ix.filter(i=>r[i]).length;const pc=solved[cur]?100:ix.length?Math.round(40+60*done/ix.length):70;return`<div class="bar"><b>${n} ${pc}%</b><div><i style="width:${pc}%"></i></div></div>`}).join('');
+let h='';q("SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").values.forEach(([n,s])=>{const c=one(`SELECT COUNT(*) FROM "${n}"`);h+=`<b>${esc(n)}</b> (${c} filas)<pre>${esc(s)}\n\n${esc(fmt(q(`SELECT * FROM "${n}" LIMIT 5`)))}</pre>`});
+q("SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL").values.forEach(([n])=>h+=`<div class="ob ok">índice: ${esc(n)}</div>`);$('#ins').innerHTML=h;return r}
+function commit(){const m=M[cur],r=m.chk();p('\n▶ Ejecutando suite de verificación y pen-test (inyección de duplicados/nulos, borrados conflictivos, EXPLAIN QUERY PLAN)...','i');
+m.obs.forEach((o,i)=>p((r[i]?'  [PASS] ':'  [FAIL] ')+o[0],r[i]?'o':'e'));
+if(r.every(Boolean)){solved[cur]=1;if(cur<2)unlocked[cur+1]=1;render();p('\n═══ REPORTE FORENSE: INCIDENTE RESUELTO ═══','o');p('Confidencialidad 100% · Integridad 100% · Disponibilidad 100%','o');
+p(cur<2?"Siguiente misión desbloqueada. Escribe 'next' para continuar.":'¡Completaste las 3 misiones! Eres un Incident Commander.','o')}else{p('Faltan objetivos. Usa audit para diagnosticar y corrige.','w');render()}}
+const CMD={
+help(){p('Comandos:','i');['help  · esta ayuda','missions  · lista de misiones y estado','load <id>  · cargar misión desbloqueada','next  · avanzar a la siguiente misión','reset  · reiniciar la misión actual','audit <sub>  · diagnóstico ('+Object.keys(M[cur].audit).join(', ')+')','inspect <tabla>  · ver tabla','sql <consulta>  · ejecutar SQL real (SQLite)','commit-incident  · verificar la misión','clear  · limpiar consola'].forEach(x=>p(' '+x))},
+missions(){M.forEach((m,i)=>{const s=solved[i]?'Resuelta':unlocked[i]?'En Curso':'Bloqueada';p(` ${m.id}. ${m.name} [${s}]`,solved[i]?'o':unlocked[i]?'w':'e')});p(" Usa 'load <id>'.",'m')},
+load(a){const i=+a-1;if(!M[i])return p('ID inválido.','e');if(!unlocked[i])return p('Misión bloqueada.','e');load(i)},
+next(){if(!solved[cur])return p('Resuelve la misión actual con commit-incident.','w');if(cur>=2)return p('No hay más misiones.','i');load(cur+1)},
+reset(){load(cur,1)},
+audit(a){const f=M[cur].audit[a];if(!f)return p('Subcomandos: '+Object.keys(M[cur].audit).join(', '),'w');p(f(),'i')},
+inspect(a){if(!a)return p('Uso: inspect <tabla>','w');p(fmt(q(`SELECT * FROM "${a}"`)))},
+sql(a){if(!a)return p('Uso: sql <consulta>','w');const r=db.exec(a);r.forEach(x=>p(fmt(x)));p(r.length?`(${r.reduce((n,x)=>n+x.values.length,0)} filas)`:`OK · ${db.getRowsModified()} filas afectadas`,'o');render()},
+'commit-incident':commit,clear(){out.innerHTML=''}};
+function run(l){l=l.trim();if(!l)return;p('analyst@incident-ops:~$ '+l,'m');hist.push(l);hi=hist.length;const [c,...r]=l.split(/\s+/),a=r.join(' ');
+if(!CMD[c])return p(`Comando desconocido: ${c}. Escribe 'help'.`,'e');try{CMD[c](a)}catch(e){p('Error: '+e.message,'e');try{render()}catch(x){}}}
+$('#f').onsubmit=e=>{e.preventDefault();const v=$('#in').value;$('#in').value='';run(v)};
+$('#in').onkeydown=e=>{if(e.key=='ArrowUp'&&hi>0){$('#in').value=hist[--hi]}else if(e.key=='ArrowDown'&&hi<hist.length){$('#in').value=hist[++hi]||''}};
+p('INCIDENT COMMANDER · SOC Terminal v1.0','i');p('Cargando motor SQLite (WebAssembly)...','m');
+initSqlJs({locateFile:f=>'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/'+f}).then(S=>{SQL=S;p('Motor listo.','o');load(0,1)}).catch(e=>p('No se pudo cargar sql.js (¿sin conexión?): '+e,'e'));
+</script></body></html>

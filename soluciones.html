@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Incident Commander · Guía de soluciones</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f4f6fa;--pn:#fff;--ln:#d5dbe6;--tx:#1e293b;--mu:#5b6b82;--ac:#0e7490;--ok:#15803d;--cd:#eef2f7}
+:root:not([data-theme="light"]){}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b1220;--pn:#111a2e;--ln:#22314f;--tx:#cbd5e1;--mu:#8395b0;--ac:#22d3ee;--ok:#4ade80;--cd:#0b1220}}
+:root[data-theme="dark"]{--bg:#0b1220;--pn:#111a2e;--ln:#22314f;--tx:#cbd5e1;--mu:#8395b0;--ac:#22d3ee;--ok:#4ade80;--cd:#0b1220}
+html{scroll-padding-top:env(safe-area-inset-top,0px);scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.65 Georgia,"Times New Roman",serif}
+main{max-width:760px;margin:0 auto;padding:24px 16px 60px}
+h1{font-size:28px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:0 0 4px}h3{font-size:16px;margin:20px 0 8px;font-family:system-ui,sans-serif;color:var(--ac)}
+p{margin:8px 0}.mu{color:var(--mu)}
+nav a{display:inline-block;margin:4px 8px 4px 0;padding:4px 12px;border:1px solid var(--ln);border-radius:20px;color:var(--ac);text-decoration:none;font:14px system-ui,sans-serif}
+section{background:var(--pn);border:1px solid var(--ln);border-radius:10px;padding:20px;margin-top:28px}
+details{border:1px solid var(--ln);border-radius:8px;margin:8px 0;background:var(--pn)}
+summary{cursor:pointer;padding:9px 12px;font:600 15px system-ui,sans-serif}
+summary:focus-visible{outline:2px solid var(--ac)}
+details>div{padding:0 12px 10px}
+details.sol{border-color:var(--ok)}details.sol>summary{color:var(--ok)}
+.res{background:var(--cd);border-left:3px solid var(--ac);padding:10px 14px;border-radius:0 8px 8px 0;margin:8px 0}
+pre{background:var(--cd);border:1px solid var(--ln);border-radius:8px;padding:10px;overflow-x:auto;font:13px/1.5 ui-monospace,Consolas,monospace;margin:8px 0}
+code{font:0.88em ui-monospace,Consolas,monospace;background:var(--cd);padding:1px 5px;border-radius:4px}
+pre code{padding:0;background:none}
+.tip{font:14px system-ui,sans-serif;color:var(--mu)}
+</style></head><body><main>
+<h1>Guía de soluciones · Incident Commander</h1>
+<p class="mu">Cada misión sigue el mismo camino: repasa los conceptos, responde las preguntas guía (abre una pista solo si te atoras) y, como último recurso, revela la solución. Intenta escribir tu propio SQL en el juego antes de mirar la respuesta.</p>
+<nav><a href="#m1">Misión 1</a><a href="#m2">Misión 2</a><a href="#m3">Misión 3</a></nav>
+
+<section id="m1"><h2>Misión 1 · The Intern's Token</h2><p class="mu">Menor privilegio y restricciones DDL</p>
+<h3>Recursos de estudio</h3>
+<div class="res"><b>Principio de menor privilegio (PoLP):</b> cada usuario o servicio recibe solo los permisos indispensables para su labor. Si su credencial se compromete, el daño queda limitado (menor <i>radio de explosión</i>).<br><br>
+<b>NOT NULL</b> impide valores nulos en una columna. <b>UNIQUE</b> impide valores repetidos. Ejemplo: <code>email TEXT NOT NULL UNIQUE</code>.<br><br>
+<b>Dato de SQLite:</b> no permite <code>ALTER TABLE ... ADD CONSTRAINT</code>. Para añadir restricciones se reconstruye la tabla: crear la nueva, copiar los datos, borrar la vieja y renombrar.</div>
+<h3>Preguntas guía</h3>
+<details><summary>1. ¿Qué dos campos de permisos tiene intern_04 que no debería tener?</summary><div>Ejecuta <code>audit perms</code>. Fíjate en <code>es_admin</code> y <code>puede_leer_vip</code>. ¿Qué sentencia modifica filas existentes? Recuerda filtrar con <code>WHERE</code> o cambiarás a todos.</div></details>
+<details><summary>2. ¿Puedes agregar UNIQUE con un simple ALTER TABLE?</summary><div>No en SQLite. Piensa en el proceso de cuatro pasos: crear tabla nueva con las restricciones, copiar, borrar la original, renombrar.</div></details>
+<details><summary>3. ¿Por qué falla la copia si copias todo tal cual?</summary><div>Ejecuta <code>audit schema</code>. Hay emails duplicados y nulos en los datos actuales. La tabla nueva los rechazará, así que debes depurarlos al copiar (por ejemplo, conservar un solo registro por email y asignar un correo a quienes no tienen).</div></details>
+<details class="sol"><summary>Revelar solución</summary><div>
+<pre><code>UPDATE permisos_usuarios SET es_admin=0, puede_leer_vip=0 WHERE usuario='intern_04';
+
+CREATE TABLE empleados_new(id INTEGER PRIMARY KEY, nombre TEXT,
+  email TEXT NOT NULL UNIQUE, rol TEXT);
+
+INSERT INTO empleados_new(id,nombre,email,rol)
+SELECT id, nombre, COALESCE(email, lower(nombre)||'@corp.com'), rol
+FROM empleados
+WHERE email IS NULL
+   OR id IN (SELECT MIN(id) FROM empleados WHERE email IS NOT NULL GROUP BY email);
+
+DROP TABLE empleados;
+ALTER TABLE empleados_new RENAME TO empleados;</code></pre>
+<p>Después ejecuta <code>commit-incident</code>. Escribe cada bloque en una sola línea con <code>sql</code> delante.</p>
+<p class="tip"><b>Por qué funciona:</b> el UPDATE aplica PoLP; <code>COALESCE</code> rellena los nulos; el <code>MIN(id)</code> elimina duplicados. En un caso real, borrar a "Ana Ruiz" sería una decisión de negocio: quizá corresponda corregir su email en lugar de descartarla.</p></div></details></section>
+
+<section id="m2"><h2>Misión 2 · Ghost Invoices</h2><p class="mu">Claves foráneas e integridad referencial</p>
+<h3>Recursos de estudio</h3>
+<div class="res"><b>Llave foránea (FK):</b> columna que apunta a la llave primaria de otra tabla y crea un vínculo relacional.<br><br>
+<b>Integridad referencial:</b> ninguna FK puede apuntar a un dato inexistente.<br><br>
+<b>Reglas de cascada:</b> <code>RESTRICT</code> impide borrar o actualizar al padre si tiene hijos; <code>CASCADE</code> propaga el cambio; <code>SET NULL</code> pone la FK del hijo en NULL.<br><br>
+<b>Huérfano:</b> fila hija cuya FK no coincide con ningún padre. Se detecta con un <code>LEFT JOIN</code> y <code>IS NULL</code>.</div>
+<h3>Preguntas guía</h3>
+<details><summary>1. ¿Cómo encuentras las facturas sin usuario?</summary><div>Ejecuta <code>audit orphans</code>. Verás las facturas con id_usuario 99 y 404. ¿Las borras o las reasignas? Ambas opciones son válidas; borrar es lo más simple aquí.</div></details>
+<details><summary>2. ¿Puedes agregar la FK a la tabla existente?</summary><div>No en SQLite. Reconstruye <code>facturas</code> con la cláusula <code>FOREIGN KEY (...) REFERENCES ... ON DELETE ...</code>.</div></details>
+<details><summary>3. ¿Cuál regla de cascada evita borrar un usuario con facturas?</summary><div>La que "restringe" la operación. Comprueba luego con <code>audit fk</code> y con un <code>DELETE</code> real.</div></details>
+<details class="sol"><summary>Revelar solución</summary><div>
+<pre><code>DELETE FROM facturas
+WHERE id_usuario NOT IN (SELECT id_usuario FROM usuarios);
+
+CREATE TABLE facturas_new(
+  id_factura INTEGER PRIMARY KEY,
+  id_usuario INTEGER NOT NULL,
+  monto REAL,
+  FOREIGN KEY (id_usuario) REFERENCES usuarios(id_usuario) ON DELETE RESTRICT);
+
+INSERT INTO facturas_new SELECT * FROM facturas;
+DROP TABLE facturas;
+ALTER TABLE facturas_new RENAME TO facturas;</code></pre>
+<p>Prueba: <code>sql DELETE FROM usuarios WHERE id_usuario=1</code> debe fallar con "FOREIGN KEY constraint failed". Luego <code>commit-incident</code>.</p>
+<p class="tip"><b>Alternativa:</b> en vez de borrar, crea un usuario "Desconocido" y reasigna las facturas con <code>UPDATE</code> para conservar el rastro contable. El juego acepta ambas.</p></div></details></section>
+
+<section id="m3"><h2>Misión 3 · The Monolith Freeze</h2><p class="mu">Normalización 1NF a 3NF e indexación</p>
+<h3>Recursos de estudio</h3>
+<div class="res"><b>1NF:</b> valores atómicos, sin listas en una celda. <code>'Laptop;Mouse'</code> las viola.<br><br>
+<b>2NF y 3NF:</b> cada atributo depende de la clave y solo de ella. El nombre, email y ciudad del cliente dependen del cliente, no del pedido; por eso van en su propia tabla.<br><br>
+<b>Tabla de detalle (o pivote):</b> guarda una fila por cada producto de un pedido, enlazada por FK.<br><br>
+<b>Índice:</b> estructura (B-tree) que evita el <i>Full Table Scan</i>. En <code>EXPLAIN QUERY PLAN</code>, <code>SCAN</code> es recorrido completo y <code>SEARCH ... USING INDEX</code> es búsqueda indexada.</div>
+<h3>Preguntas guía</h3>
+<details><summary>1. ¿Qué entidades se mezclan en la tabla monolito?</summary><div>Clientes, pedidos y productos por pedido. Tres entidades, tres tablas: <code>clientes</code>, <code>pedidos</code>, <code>detalle_pedidos</code>.</div></details>
+<details><summary>2. ¿Cómo sacas los clientes sin repetirlos?</summary><div><code>SELECT DISTINCT</code> sobre las columnas del cliente. Luego, para enlazar pedidos, une por un campo estable como el email.</div></details>
+<details><summary>3. ¿Cómo separas 'A;B;C' en filas?</summary><div>SQLite no tiene función <code>split</code>. Usa un CTE recursivo con <code>instr</code> y <code>substr</code>: toma el texto antes del primer ';' y continúa con el resto. Añadir un ';' al final simplifica el caso de la última palabra.</div></details>
+<details><summary>4. ¿Sobre qué columna debe ir el índice y cómo lo verificas?</summary><div>Sobre <code>pedidos(fecha_pedido)</code>. Ejecuta <code>audit plan</code> antes y después: debe cambiar de SCAN a SEARCH ... USING INDEX.</div></details>
+<details class="sol"><summary>Revelar solución</summary><div>
+<pre><code>CREATE TABLE clientes(id INTEGER PRIMARY KEY, nombre TEXT, email TEXT UNIQUE, ciudad TEXT);
+INSERT INTO clientes(nombre,email,ciudad)
+  SELECT DISTINCT cliente_nombre, cliente_email, cliente_ciudad FROM monolito;
+
+CREATE TABLE pedidos(id_pedido INTEGER PRIMARY KEY,
+  id_cliente INTEGER REFERENCES clientes(id), fecha_pedido TEXT, total REAL);
+INSERT INTO pedidos
+  SELECT m.id_pedido, c.id, m.fecha_pedido, m.total
+  FROM monolito m JOIN clientes c ON c.email = m.cliente_email;
+
+CREATE TABLE detalle_pedidos(id_detalle INTEGER PRIMARY KEY,
+  id_pedido INTEGER REFERENCES pedidos(id_pedido), producto TEXT);
+WITH RECURSIVE s(id,item,rest) AS (
+  SELECT id_pedido, '', productos||';' FROM monolito
+  UNION ALL
+  SELECT id, substr(rest,1,instr(rest,';')-1), substr(rest,instr(rest,';')+1)
+  FROM s WHERE rest <> '')
+INSERT INTO detalle_pedidos(id_pedido,producto)
+  SELECT id, item FROM s WHERE item <> '';
+
+CREATE INDEX idx_pedidos_fecha ON pedidos(fecha_pedido);
+DROP TABLE monolito;</code></pre>
+<p class="tip"><b>Por qué funciona:</b> cada hecho vive en un solo lugar (3NF), los productos son atómicos (1NF) y la búsqueda por fecha usa el índice en lugar de recorrer toda la tabla. Ejecuta <code>commit-incident</code> al terminar.</p></div></details></section>
+</main></body></html>
