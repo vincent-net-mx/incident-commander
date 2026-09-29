@@ -41,16 +41,21 @@ pre code{padding:0;background:none}
 <details class="sol"><summary>Revelar solución</summary><div>
 <pre><code>UPDATE permisos_usuarios SET es_admin=0, puede_leer_vip=0 WHERE usuario='intern_04';
 
+%% Comando 1.
 CREATE TABLE empleados_new(id INTEGER PRIMARY KEY, nombre TEXT,
   email TEXT NOT NULL UNIQUE, rol TEXT);
 
+%% Comando 2:
 INSERT INTO empleados_new(id,nombre,email,rol)
 SELECT id, nombre, COALESCE(email, lower(nombre)||'@corp.com'), rol
 FROM empleados
 WHERE email IS NULL
    OR id IN (SELECT MIN(id) FROM empleados WHERE email IS NOT NULL GROUP BY email);
 
+%% Comando 3:
 DROP TABLE empleados;
+
+%% Comando 4:
 ALTER TABLE empleados_new RENAME TO empleados;</code></pre>
 <p>Después ejecuta <code>commit-incident</code>. Escribe cada bloque en una sola línea con <code>sql</code> delante.</p>
 <p class="tip"><b>Por qué funciona:</b> el UPDATE aplica PoLP; <code>COALESCE</code> rellena los nulos; el <code>MIN(id)</code> elimina duplicados. En un caso real, borrar a "Ana Ruiz" sería una decisión de negocio: quizá corresponda corregir su email en lugar de descartarla.</p></div></details></section>
