@@ -1,6 +1,12 @@
 # Guía de Estudio: Bases de Datos y Arquitectura de Seguridad
 
+En este repositorio encontrarás tres cosas:
+1. **Guía de estudio teórica** (`readme.md`, este archivo que estás leyendo). Incluye los contenidos y conceptos vistos en la materia de Base de Datos.
+2. **Guía de estudio práctica** ([`index.html`](https://vincent-net-mx.github.io/incident-commander/)). Incluye una serie de ejercicios en una terminal, donde deberás ejecutar comandos.
+3. **Guía de soluciones** ([`soluciones.html`](https://vincent-net-mx.github.io/incident-commander/)). Incluye la solución a cada fase de los retos prácticos de la terminal, así como recursos para resolver cada problema y preguntas guía si deseas tratar de encontrar la solución por ti mismo antes de revelarla.
+
 ---
+# Guía Teórica
 
 ## MÓDULO 1: Fundamentos y Diseño de Bases de Datos
 
